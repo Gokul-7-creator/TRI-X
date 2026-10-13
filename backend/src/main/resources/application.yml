@@ -1,0 +1,28 @@
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    session:
+      cookie:
+        http-only: true
+        same-site: lax
+spring:
+  application:
+    name: triage-x
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:55432/triagex}
+    username: ${DB_USER:triagex}
+    password: ${DB_PASSWORD:triagex_local}
+  flyway:
+    enabled: true
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+app:
+  admin:
+    email: ${ADMIN_EMAIL:admin@triagex.local}
+    password: ${ADMIN_PASSWORD:}
+  demo-users: ${SEED_DEMO_USERS:false}
