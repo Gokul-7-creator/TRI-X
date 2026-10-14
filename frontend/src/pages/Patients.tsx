@@ -29,6 +29,9 @@ export function Register(){
  const [historyNotes,setHistoryNotes]=useState('');const [allergies,setAllergies]=useState('');
  const [assessment,setAssessment]=useState<any>(null);const [createdId,setCreatedId]=useState<number|null>(null);
  const [priority,setPriority]=useState('');const [overrideReason,setOverrideReason]=useState('');
+ const [aiExplanation, setAiExplanation] = useState('');
+ const [aiLoading, setAiLoading] = useState(false);
+ const [aiSource, setAiSource] = useState('');
  const [busy,setBusy]=useState(false);const [error,setError]=useState('');
  const updateVitals=(key:IntakeVitals,value:string)=>setVitals(current=>({...current,[key]:value}));
  function toggleSymptom(name:string){setSelectedSymptoms(prev=>{const next={...prev};if(next[name])delete next[name];else next[name]='Moderate';return next})}
@@ -52,6 +55,37 @@ export function Register(){
    if(id===null){const r=await api.post('/patients',{...details,age:Number(details.age),symptoms:symptomString,medicalHistory,allergies,historyFlags,symptomSeverities:selectedSymptoms});id=r.data.id;setCreatedId(id);bump();}
    const result=await api.post('/triage/assess',{patientId:id,temperature:temperatureC,heartRate:numeric('heartRate'),systolic:numeric('systolic'),diastolic:numeric('diastolic'),spo2:numeric('spo2'),respiratoryRate:numeric('respiratoryRate'),pain:numeric('pain'),notes:`Nurse intake. ${symptomNotes} ${historyNotes}`.trim()});
    setAssessment(result.data);setPriority(result.data.recommended);bump();
+   // Automatically generate explanation after priority assignment
+
+setAiLoading(true);
+setAiExplanation('');
+setAiSource('');
+
+void api.post(`/triage/${result.data.id}/explain`)
+
+    .then((response) => {
+
+        setAiExplanation(response.data.explanation);
+        setAiSource(response.data.source);
+
+    })
+
+    .catch(() => {
+
+        setAiExplanation(
+            'AI explanation is unavailable. ' +
+            'Please review the priority rule flags above.'
+        );
+
+        setAiSource('RULES');
+
+    })
+
+    .finally(() => {
+
+        setAiLoading(false);
+
+    });
   }catch(e){setError(errorMessage(e));}finally{setBusy(false)}
  }
  async function confirm(){
@@ -71,6 +105,29 @@ export function Register(){
    <Badge value={assessment.recommended}/>
   </div>
   <div className="flags-list">{assessment.flags?assessment.flags.split(' | ').map((x:string,i:number)=><div key={i}>{x}</div>):<p className="muted">No demonstration flags triggered. Professional review is still required.</p>}</div>
+  <div className="priority-review-guide">
+
+    <ShieldCheck size={18} />
+
+    <div>
+
+        <strong>
+            {aiLoading
+                ? '🤖 Generating AI Explanation...'
+                : aiSource === 'AI'
+                    ? '🤖 AI-Generated Priority Explanation'
+                    : 'Priority Explanation'}
+        </strong>
+
+        <span>
+            {aiLoading
+                ? 'Please wait while the LLM explains the assigned priority.'
+                : aiExplanation}
+        </span>
+
+    </div>
+
+</div>
   <div className="priority-review-guide"><ShieldCheck size={18}/><div><strong>Nurse confirmation required</strong><span>Screening flags are for demonstration only. Review recorded symptoms and vital signs before confirming the final queue category.</span></div></div>
   <div className="form-grid"><Field label="Nurse-confirmed priority"><select className={`priority-select priority-select-${priority.toLowerCase()}`} value={priority} onChange={e=>setPriority(e.target.value)}><option value="CRITICAL">Critical</option><option value="URGENT">Urgent</option><option value="NORMAL">Normal</option></select></Field>{priority!==assessment.recommended&&<Field label="Override reason (required, at least 8 characters)"><textarea value={overrideReason} onChange={e=>setOverrideReason(e.target.value)} rows={2} minLength={8}/></Field>}</div>
   <div className="intake-footer"><button className="button button-primary" disabled={busy||!priority||(priority!==assessment.recommended&&overrideReason.trim().length<8)} onClick={confirm}>{busy?'Saving…':'Confirm & add to priority queue'} <ArrowRight size={17}/></button></div>
