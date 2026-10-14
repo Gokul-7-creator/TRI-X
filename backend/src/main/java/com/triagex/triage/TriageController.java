@@ -10,8 +10,19 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController @RequestMapping("/api/triage")
 @PreAuthorize("hasRole('NURSE')")
 public class TriageController {
-  private final JdbcTemplate db; private final Support sup;
-  public TriageController(JdbcTemplate db,Support sup){this.db=db;this.sup=sup;}
+  private final JdbcTemplate db;
+private final Support sup;
+private final AiExplanationService ai;
+
+public TriageController(
+        JdbcTemplate db,
+        Support sup,
+        AiExplanationService ai) {
+
+    this.db = db;
+    this.sup = sup;
+    this.ai = ai;
+}
   public record Assessment(long patientId,Integer heartRate,Double spo2,Double temperature,Integer systolic,Integer diastolic,Integer respiratoryRate,Integer pain,String notes){}
   public record Confirmation(String priority,String reason){}
   @PostMapping("/assess") public Map<String,Object> assess(@RequestBody Assessment a){
@@ -32,6 +43,61 @@ public class TriageController {
     sup.audit("CREATE_ASSESSMENT","PATIENT",a.patientId(),"Assessment "+id+" provisional "+recommendation); sup.notifyChange();
     return db.queryForList("SELECT * FROM assessments WHERE id=?",id).get(0);
   }
+  @PostMapping("/{id}/explain")
+public Map<String, String> explain(
+        @PathVariable long id) {
+
+    var rows = db.queryForList(
+            "SELECT recommended, flags FROM assessments WHERE id=?",
+            id
+    );
+
+    if (rows.isEmpty()) {
+        throw new ResponseStatusException(
+                HttpStatus.NOT_FOUND,
+                "Assessment not found"
+        );
+    }
+
+    var assessment = rows.get(0);
+
+    String priority = Objects.toString(
+            assessment.get("recommended"), "NORMAL");
+
+    String flags = Objects.toString(
+            assessment.get("flags"), "");
+
+    try {
+
+        String explanation =
+                ai.generateExplanation(priority, flags);
+
+        return Map.of(
+                "explanation", explanation,
+                "source", "AI"
+        );
+
+    } catch (Exception e) {
+
+        System.err.println(
+                "AI explanation unavailable: " +
+                e.getMessage());
+
+        String fallback = flags.isBlank()
+                ? "The system recommended " + priority +
+                  " because no configured warning rule was triggered. " +
+                  "Nurse review is required."
+                : "The system recommended " + priority +
+                  " because: " +
+                  flags.replace(" | ", "; ") +
+                  ". Nurse review is required.";
+
+        return Map.of(
+                "explanation", fallback,
+                "source", "RULES"
+        );
+    }
+}
   @PostMapping("/{id}/confirm") public Map<String,String> confirm(@PathVariable long id,@RequestBody Confirmation req) {
     sup.require(Set.of("CRITICAL","URGENT","NORMAL").contains(req.priority()),"Invalid priority");
     var rows=db.queryForList("SELECT patient_id,recommended,confirmed FROM assessments WHERE id=?",id);
