@@ -24,15 +24,43 @@ import org.springframework.web.server.ResponseStatusException;
 public class AuthController {
   private final JdbcTemplate db; private final PasswordEncoder encoder; private final AuthenticationManager auth; private final Support sup;
   public AuthController(JdbcTemplate db,PasswordEncoder encoder,AuthenticationManager auth,Support sup){this.db=db;this.encoder=encoder;this.auth=auth;this.sup=sup;}
-  public record Signup(@NotBlank String name,@Email @NotBlank String email,@Size(min=12) String password,@NotBlank String role){}
+  public record Signup(
+        @NotBlank String name,
+        @Email @NotBlank String email,
+        @Size(min=12) String password,
+        @NotBlank String role,
+        String doctorGrade
+) {}
   public record Login(String email,String password){}
   @GetMapping("/csrf") public Map<String,String> csrf(CsrfToken token) { return Map.of("token",token.getToken()); }
   @PostMapping("/signup") @Transactional public Map<String,Object> signup(@Valid @RequestBody Signup s) {
     String role=s.role().toUpperCase();
     if(!Set.of("PATIENT","DOCTOR","NURSE").contains(role)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid signup role");
     if(db.queryForObject("SELECT COUNT(*) FROM users WHERE email=?",Long.class,s.email().toLowerCase())>0) throw new ResponseStatusException(HttpStatus.CONFLICT,"Email already registered");
+    String doctorGrade = null;
+
+if ("DOCTOR".equals(role)) {
+
+    doctorGrade = s.doctorGrade() == null
+            || s.doctorGrade().isBlank()
+            ? "JUNIOR"
+            : s.doctorGrade().trim().toUpperCase();
+
+    sup.require(
+            Set.of("SENIOR", "JUNIOR").contains(doctorGrade),
+            "Invalid doctor designation"
+    );
+}
     boolean approved=true;
-    db.update("INSERT INTO users(full_name,email,password_hash,role,approved) VALUES(?,?,?,?,?)",s.name().trim(),s.email().trim().toLowerCase(),encoder.encode(s.password()),role,approved);
+    db.update(
+    "INSERT INTO users(full_name,email,password_hash,role,approved,doctor_grade) VALUES(?,?,?,?,?,?)",
+    s.name().trim(),
+    s.email().trim().toLowerCase(),
+    encoder.encode(s.password()),
+    role,
+    approved,
+    doctorGrade
+);
     db.update("INSERT INTO audit_events(actor_id,action,entity_type,entity_id,detail) VALUES(NULL,'SELF_REGISTER','USER',?,?)",db.queryForObject("SELECT id FROM users WHERE email=?",Long.class,s.email().trim().toLowerCase()),"New "+role+" account created");
     sup.notifyChange();
     return Map.of("message","Account created. You can sign in now.","approved",true);
@@ -52,7 +80,7 @@ public class AuthController {
     } catch(org.springframework.security.core.AuthenticationException e) { throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Invalid email or password"); }
   }
   @GetMapping("/me") public Map<String,Object> me(){
-    var items=db.queryForList("SELECT id,full_name AS name,email,role,approved FROM users WHERE id=?",sup.userId());
+    var items=db.queryForList("SELECT id,full_name AS name,email,role,approved,doctor_grade AS \"doctorGrade\" FROM users WHERE id=?",sup.userId());
     return items.get(0);
   }
 }
