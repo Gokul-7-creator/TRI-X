@@ -13,24 +13,91 @@ export function SmartQueue(){const {refresh,bump,user}=useApp();const [queue,set
 export function Monitoring(){const {refresh}=useApp();const [items,setItems]=useState<any[]>([]);const [interval,setIntervalMinutes]=useState(30);const [err,setErr]=useState('');useEffect(()=>{api.get('/queue/monitoring',{params:{minutes:interval}}).then(r=>setItems(r.data)).catch(e=>setErr(errorMessage(e)));},[refresh,interval]);return <><Header eyebrow="PROACTIVE PATIENT SAFETY" title="Smart Re-Triage Watch" sub="Review reminders based on time since a patient's last assessment — no automatic escalation." action={<div className="interval-control"><Clock3 size={17}/><span>Review after</span><select value={interval} onChange={e=>setIntervalMinutes(Number(e.target.value))}><option value={5}>5 min</option><option value={15}>15 min</option><option value={30}>30 min</option><option value={60}>60 min</option></select></div>}/><div className="monitor-banner"><span className="monitor-icon"><HeartPulse size={31}/></span><div><div className="eyebrow">EXPLAINABLE REASSESSMENT</div><h2>Don't let patients disappear into the waiting room.</h2><p>When a review interval is exceeded, nurses can record updated vitals and independently confirm any priority change.</p></div></div><Alert message={err}/><div className="card"><div className="card-title"><div><div className="eyebrow">REVIEW QUEUE</div><h3>{items.length} patients due for reassessment</h3></div><Badge value={items.length?'URGENT':'NORMAL'}/></div>{items.length?<div className="table-wrap"><table><thead><tr><th>PATIENT</th><th>PRIORITY</th><th>TIME SINCE REVIEW</th><th>REMINDER</th><th/></tr></thead><tbody>{items.map(p=><tr key={p.patient_id}><td><b>{p.name}</b><small>{p.patient_code}</small></td><td><Badge value={p.priority}/></td><td>{Math.max(0,Number(p.minutes_since_review)||0)} min</td><td><span className="reassessment-due"><AlertTriangle size={15}/> Reassessment due</span></td><td><Link to={`/app/triage?patient=${p.patient_id}`} className="button button-soft button-sm">Reassess <RotateCcw size={15}/></Link></td></tr>)}</tbody></table></div>:<Empty title="All patients are within the review window" sub="Time-based reassessment reminders will appear here automatically."/>}</div><div className="safety-strip"><ShieldCheck size={18}/><span>This configurable timer is only a prototype reminder. Real review intervals must follow approved hospital procedures.</span></div></>}
 export function Doctor(){
  const {refresh,bump,user}=useApp();
- const [queue,setQueue]=useState<any[]>([]); const [patients,setPatients]=useState<Patient[]>([]);
+ const [queue,setQueue]=useState<any[]>([]);const [doctors, setDoctors] = useState<{
+    id: number;
+    name: string;
+    grade: 'SENIOR' | 'JUNIOR';
+}[]>([]); const [patients,setPatients]=useState<Patient[]>([]);
  const [notes,setNotes]=useState<Record<number,string>>({});const [summary,setSummary]=useState<any>(null);
  const [error,setError]=useState('');const [busy,setBusy]=useState(0);const [loading,setLoading]=useState(true);
- useEffect(()=>{let valid=true;Promise.all([api.get('/queue'),api.get('/patients')]).then(([q,p])=>{
-   if(valid){setQueue(q.data);setPatients(p.data);setError('');}
+ useEffect(()=>{let valid=true;Promise.all([
+    api.get('/queue'),
+    api.get('/patients'),
+    api.get('/queue/doctors')
+]).then(([q,p,d])=>{
+   if(valid){setQueue(q.data);
+setPatients(p.data);
+setDoctors(d.data);
+setError('');}
  }).catch(e=>{if(valid)setError(errorMessage(e))}).finally(()=>{if(valid)setLoading(false)});return()=>{valid=false};},[refresh]);
  const waiting=queue.filter(x=>x.status==='WAITING');
+ const doctorGrade = user?.doctorGrade || 'JUNIOR';
+
+const doctorTitle = doctorGrade === 'SENIOR'
+    ? 'Senior Doctor'
+    : 'Junior Doctor';
  const active=queue.filter(x=>x.status==='IN_CONSULTATION'&&Number(x.doctor_id)===user?.id);
  const awaiting=patients.filter(p=>p.status==='AWAITING_ASSESSMENT');
  async function start(id:number){setBusy(id);setError('');try{await api.post(`/queue/${id}/start`,{});bump()}catch(e){setError(errorMessage(e))}finally{setBusy(0)}}
  async function finish(id:number){setBusy(id);setError('');try{await api.post(`/queue/${id}/finish`,{notes:notes[id]||''});bump();}catch(e){setError(errorMessage(e));}finally{setBusy(0)}}
  async function openSummary(id:number){setError('');try{const r=await api.get(`/patients/${id}`);setSummary(r.data);}catch(e){setError(errorMessage(e));}}
  return <>
- <Header eyebrow="DOCTOR STATION · LIVE" title="Doctor dashboard" sub="All nurse-registered patients are visible here. Patient entry and triage remain restricted to nurses." action={<a href="#doctor-priority" className="button button-primary"><Stethoscope size={17}/> Priority list <ArrowRight size={16}/></a>}/>
+ <Header eyebrow="DOCTOR STATION · LIVE" title={`${doctorTitle} dashboard`} sub="All nurse-registered patients are visible here. Patient entry and triage remain restricted to nurses." action={<a href="#doctor-priority" className="button button-primary"><Stethoscope size={17}/> Priority list <ArrowRight size={16}/></a>}/>
  <div className="role-intro role-intro-doctor"><div><div className="role-kicker"><span className="online-dot"/> CONNECTED TO NURSING STATION</div><h2>See the right patient.<br/><em>At the right moment.</em></h2><p>New registrations arrive automatically. Confirmed priorities determine queue order. Review medical intake without editing nurse-entered details.</p><div className="role-actions"><a href="#doctor-priority" className="button button-primary">Open priority list <ArrowRight size={17}/></a><a href="#doctor-new" className="button button-outline">New nurse entries</a></div></div><div className="role-decor"><Stethoscope size={102} strokeWidth={.8}/></div></div>
  <Alert message={error} onClose={()=>setError('')}/>
+  <div className="card top-gap">
+
+    <div className="card-title">
+        <div>
+            <div className="eyebrow">
+                DOCTOR ASSIGNMENT
+            </div>
+
+            <h3>Senior & Junior Doctors</h3>
+        </div>
+
+        <span className="soft-tag">
+            Logged in: {doctorTitle}
+        </span>
+    </div>
+
+    <div className="queue-summary">
+
+        <div className="queue-summary-card queue-summary-critical">
+            <div>
+                <h3>Senior Doctor</h3>
+
+                <p>Critical Patients</p>
+
+                <small>
+                    {doctors
+                        .filter(d => d.grade === 'SENIOR')
+                        .map(d => d.name)
+                        .join(', ') || 'No senior doctor registered'}
+                </small>
+            </div>
+        </div>
+
+        <div className="queue-summary-card queue-summary-urgent">
+            <div>
+                <h3>Junior Doctor</h3>
+
+                <p>Urgent & Normal Patients</p>
+
+                <small>
+                    {doctors
+                        .filter(d => d.grade === 'JUNIOR')
+                        .map(d => d.name)
+                        .join(', ') || 'No junior doctor registered'}
+                </small>
+            </div>
+        </div>
+
+    </div>
+
+</div>
  <div className="stats-grid"><Stat icon={Clock3} label="Waiting for doctor" value={waiting.length} tone="blue"/><Stat icon={HeartPulse} label="Critical priority" value={waiting.filter(p=>p.priority==='CRITICAL').length} tone="red"/><Stat icon={ClipboardCheck} label="New nurse registrations" value={awaiting.length} tone="orange"/><Stat icon={Stethoscope} label="My active consultations" value={active.length} tone="violet"/></div>
- <section id="doctor-priority" className="card table-card top-gap"><div className="card-title"><div><div className="eyebrow">LIVE · PRIORITY FIRST</div><h3>Doctor's priority list</h3></div><span className="soft-tag"><span className="online-dot"/> {waiting.length} waiting</span></div>
+ <section id="doctor-priority" className="card table-card top-gap"><div className="card-title"><div><div className="eyebrow">LIVE · PRIORITY FIRST</div><h3>{doctorTitle} - Assigned Patients</h3></div><span className="soft-tag"><span className="online-dot"/> {waiting.length} waiting</span></div>
  {loading?<Loading/>:waiting.length?<div className="table-wrap"><table><thead><tr><th>POSITION</th><th>PATIENT</th><th>COMPLAINT</th><th>PRIORITY</th><th>WAIT TIME</th><th>ACTIONS</th></tr></thead><tbody>{waiting.map((p,i)=><tr key={p.patient_id} className={p.priority==='CRITICAL'?'priority-row-critical':''}><td><span className="queue-position">{String(i+1).padStart(2,'0')}</span></td><td><b>{p.name}</b><small>{p.patient_code}</small></td><td>{p.complaint}</td><td><Badge value={p.priority}/></td><td><Clock3 size={14} className="inline-icon"/> {Math.max(0,Number(p.waiting_minutes)||0)} min</td><td><div className="row-buttons"><button className="button button-soft button-sm" onClick={()=>openSummary(p.patient_id)}>View details</button><button className="button button-primary button-sm" disabled={busy===p.patient_id} onClick={()=>start(p.patient_id)}>Start consultation <ArrowRight size={14}/></button></div></td></tr>)}</tbody></table></div>:<Empty title="No confirmed patients waiting" sub="The priority queue fills automatically after a nurse confirms an assessment."/>}
  </section>
  <section id="doctor-new" className="card table-card top-gap"><div className="card-title"><div><div className="eyebrow">READ-ONLY INTAKE FEED</div><h3>Newly entered patients · awaiting triage</h3></div><span className="soft-tag">{awaiting.length} new</span></div>
